@@ -1,26 +1,36 @@
 {
-  "name": "flowlens-deploy",
-  "version": "0.1.0",
+  "name": "flowlens",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
-    "@xyflow/react": "^12.10.2",
-    "immer": "^11.1.4",
+    "@auth/drizzle-adapter": "^1.11.1",
+    "@aws-sdk/client-s3": "^3.930.0",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "lucide-react": "^0.542.0",
     "next": "16.2.2",
+    "next-auth": "^4.24.13",
+    "nodemailer": "^7.0.6",
+    "pg-boss": "^11.1.1",
+    "postgres": "^3.4.7",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "zustand": "^5.0.12"
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.4",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "tailwindcss": "^4",

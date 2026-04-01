@@ -1,60 +1,39 @@
-/**
- * figma-parser.ts
- *
- * Traverses a Figma file's node tree to:
- *  1. Find all top-level frames (= screens)
- *  2. Within each frame, find all action-* nodes (= interactive elements)
- *  3. Normalize bounding boxes relative to the parent frame
- */
-
 import { isActionNode, parseActionName } from "./naming-convention";
-import type { ElementType, NormalizedBounds } from "./types";
+import type {
+  ElementType,
+  FigmaParseResult,
+  FigmaScreenCandidate,
+  NormalizedBounds,
+} from "./types";
 
-// ── Types returned by the parser ─────────────────────────────────
-
-export interface ParsedHotspot {
-  figmaNodeId: string;
-  label: string;
-  elementType: ElementType;
-  rawName: string;
-  /** Absolute bounding box from Figma (pixels) */
-  absoluteBounds: { x: number; y: number; width: number; height: number };
-  /** Normalized bounds (0-1) relative to parent frame */
-  normalizedBounds: NormalizedBounds;
+interface FigmaBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-export interface ParsedFrame {
-  figmaNodeId: string;
-  name: string;
-  pageName: string;
-  /** Absolute bounding box of the frame */
-  absoluteBounds: { x: number; y: number; width: number; height: number };
-  /** All detected action-* nodes inside this frame */
-  hotspots: ParsedHotspot[];
-  /** Total child nodes in this frame (for stats) */
-  totalNodes: number;
+interface FigmaNode {
+  id: string;
+  name?: string;
+  type?: string;
+  absoluteBoundingBox?: FigmaBounds;
+  children?: FigmaNode[];
 }
 
-export interface ParseResult {
-  fileName: string;
-  pages: {
-    name: string;
-    frames: ParsedFrame[];
-  }[];
-  /** Flat list of all frames across all pages */
-  allFrames: ParsedFrame[];
-  /** Total action nodes found */
-  totalActions: number;
-  /** Summary by type */
-  summary: Record<string, number>;
+interface FigmaFilePayload {
+  name?: string;
+  lastModified?: string;
+  document?: {
+    children?: FigmaNode[];
+  };
 }
 
-// ── Bounding box normalization ───────────────────────────────────
+const SCREEN_NODE_TYPES = new Set(["FRAME", "COMPONENT", "COMPONENT_SET"]);
+const MIN_SCREEN_WIDTH = 220;
+const MIN_SCREEN_HEIGHT = 300;
 
-function normalizeBounds(
-  nodeBounds: { x: number; y: number; width: number; height: number },
-  frameBounds: { x: number; y: number; width: number; height: number }
-): NormalizedBounds {
+function normalizeBounds(nodeBounds: FigmaBounds, frameBounds: FigmaBounds): NormalizedBounds {
   if (frameBounds.width === 0 || frameBounds.height === 0) {
     return { x: 0, y: 0, w: 0, h: 0 };
   }
@@ -72,135 +51,89 @@ function normalizeBounds(
   };
 }
 
-// ── Recursive node traversal ─────────────────────────────────────
-
-function findActions(
-  node: any,
-  frameBounds: { x: number; y: number; width: number; height: number },
-  results: ParsedHotspot[],
-): number {
-  let count = 1;
-
-  // Check if this node matches the naming convention
-  if (node.name && isActionNode(node.name)) {
+function collectHotspots(node: FigmaNode, frameBounds: FigmaBounds, results: FigmaScreenCandidate["hotspots"]) {
+  if (node.name && isActionNode(node.name) && node.absoluteBoundingBox) {
     const parsed = parseActionName(node.name);
-    if (parsed && node.absoluteBoundingBox) {
+    if (parsed) {
       results.push({
         figmaNodeId: node.id,
         label: parsed.label,
         elementType: parsed.elementType,
         rawName: parsed.rawName,
-        absoluteBounds: {
-          x: node.absoluteBoundingBox.x,
-          y: node.absoluteBoundingBox.y,
-          width: node.absoluteBoundingBox.width,
-          height: node.absoluteBoundingBox.height,
-        },
-        normalizedBounds: normalizeBounds(
-          node.absoluteBoundingBox,
-          frameBounds
-        ),
+        normalizedBounds: normalizeBounds(node.absoluteBoundingBox, frameBounds),
       });
     }
   }
 
-  // Recurse into children
-  if (node.children && Array.isArray(node.children)) {
+  if (Array.isArray(node.children)) {
     for (const child of node.children) {
-      count += findActions(child, frameBounds, results);
+      collectHotspots(child, frameBounds, results);
     }
   }
-
-  return count;
 }
 
-// ── Main parser ──────────────────────────────────────────────────
-
-export function parseFigmaFile(fileData: any): ParseResult {
-  const pages: ParseResult["pages"] = [];
-  const allFrames: ParsedFrame[] = [];
-  let totalActions = 0;
-  const summary: Record<string, number> = {};
-
-  const document = fileData.document;
-  if (!document || !document.children) {
-    return {
-      fileName: fileData.name || "Unknown",
-      pages: [],
-      allFrames: [],
-      totalActions: 0,
-      summary: {},
-    };
+function isScreenCandidate(node: FigmaNode) {
+  const bounds = node.absoluteBoundingBox;
+  if (!node.type || !SCREEN_NODE_TYPES.has(node.type) || !bounds) {
+    return false;
   }
 
-  // Iterate pages
-  for (const page of document.children) {
-    const pageFrames: ParsedFrame[] = [];
+  return bounds.width >= MIN_SCREEN_WIDTH && bounds.height >= MIN_SCREEN_HEIGHT;
+}
 
-    if (!page.children) continue;
+function collectScreens(
+  nodes: FigmaNode[] | undefined,
+  pageName: string,
+  sectionName: string | null,
+  results: FigmaScreenCandidate[],
+) {
+  if (!nodes) {
+    return;
+  }
 
-    // Each direct child of a page that is a FRAME or COMPONENT_SET = a screen
-    for (const child of page.children) {
-      // Accept FRAME, COMPONENT, COMPONENT_SET as top-level screens
-      // Skip small utility components (width/height < 100)
-      const isFrame = ["FRAME", "COMPONENT", "COMPONENT_SET", "SECTION"].includes(child.type);
-      const hasBounds = child.absoluteBoundingBox;
-      const isLargeEnough =
-        hasBounds &&
-        child.absoluteBoundingBox.width >= 100 &&
-        child.absoluteBoundingBox.height >= 100;
+  for (const node of nodes) {
+    if (node.type === "SECTION") {
+      collectScreens(node.children, pageName, node.name ?? "Untitled section", results);
+      continue;
+    }
 
-      if (!isFrame || !hasBounds || !isLargeEnough) continue;
-
-      const frameBounds = {
-        x: child.absoluteBoundingBox.x,
-        y: child.absoluteBoundingBox.y,
-        width: child.absoluteBoundingBox.width,
-        height: child.absoluteBoundingBox.height,
-      };
-
-      const hotspots: ParsedHotspot[] = [];
-      const totalNodes = findActions(child, frameBounds, hotspots);
-
-      // Track summary
-      for (const h of hotspots) {
-        summary[h.elementType] = (summary[h.elementType] || 0) + 1;
-      }
-      totalActions += hotspots.length;
-
-      const frame: ParsedFrame = {
-        figmaNodeId: child.id,
-        name: child.name,
-        pageName: page.name,
-        absoluteBounds: frameBounds,
+    if (isScreenCandidate(node) && node.absoluteBoundingBox) {
+      const hotspots: FigmaScreenCandidate["hotspots"] = [];
+      collectHotspots(node, node.absoluteBoundingBox, hotspots);
+      results.push({
+        figmaNodeId: node.id,
+        name: node.name ?? "Untitled screen",
+        pageName,
+        sectionName,
+        absoluteBounds: node.absoluteBoundingBox,
         hotspots,
-        totalNodes,
-      };
-
-      pageFrames.push(frame);
-      allFrames.push(frame);
+      });
     }
+  }
+}
 
-    if (pageFrames.length > 0) {
-      pages.push({ name: page.name, frames: pageFrames });
-    }
+export function parseFigmaFile(fileKey: string, fileData: FigmaFilePayload): FigmaParseResult {
+  const pages = fileData.document?.children ?? [];
+  const screens: FigmaScreenCandidate[] = [];
+
+  for (const page of pages) {
+    const pageName = page.name ?? "Untitled page";
+    collectScreens(page.children, pageName, null, screens);
   }
 
   return {
-    fileName: fileData.name || "Unknown",
-    pages,
-    allFrames,
-    totalActions,
-    summary,
+    fileName: fileData.name ?? "Untitled Figma file",
+    fileKey,
+    lastModified: fileData.lastModified,
+    screens,
   };
 }
 
-/**
- * Parse a Figma URL to extract the file key.
- */
 export function extractFileKey(url: string): string | null {
-  const match = url.match(
-    /figma\.com\/(?:file|design|proto)\/([a-zA-Z0-9]+)/
-  );
+  const match = url.match(/figma\.com\/(?:file|design|proto)\/([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
+}
+
+export function inferElementTypeFromHotspots(elementTypes: ElementType[]): ElementType {
+  return elementTypes[0] ?? "button";
 }

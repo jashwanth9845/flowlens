@@ -1,66 +1,69 @@
 # FlowLens
 
-**Visual prototype & flow builder** powered by Figma's node tree.
+FlowLens is an open source workspace for turning Figma files and manual screenshots into searchable, shareable prototype flows.
 
-Upload screenshots. Detect interactive elements via naming convention. Build complete prototype flows — no AI, no cost.
+## What this version includes
 
-## How it works
+- Auth.js sign-in with local email fallback and optional Google, GitHub, and magic-link providers
+- Protected app workspace under `/app`
+- Figma integration settings with OAuth scaffolding and PAT fallback
+- Figma file import with screenshot caching and page/section-based categorization
+- Manual project mode with screenshot uploads and drawn hotspots
+- Cards-first editor with filters, search, tags, share links, and a built-in player
+- Local fallbacks for auth/data/storage so the app stays runnable without full production infra
 
-1. **Name components in Figma**: `action-button-deposit`, `action-link-settings`, `action-nav-home`
-2. **Connect FlowLens** to your Figma file (personal access token + file URL)
-3. **Upload screenshots** for each screen/frame
-4. **Connect actions** — click a detected button → pick target screen
-5. **See the complete flow** — visual graph + playable prototype
+## Stack
 
-## Naming convention
+- Next.js 16 App Router
+- React 19
+- Tailwind CSS v4
+- Auth.js
+- Drizzle schema for Postgres
+- Optional `pg-boss` queue integration
+- Optional S3-compatible object storage
 
-```
-action-{type}-{label}
-```
-
-| Figma Node Name | Detected As |
-|---|---|
-| `action-button-deposit` | button: **Deposit** |
-| `action-link-settings` | link: **Settings** |
-| `action-nav-home` | nav-item: **Home** |
-| `action-icon-back` | icon-button: **Back** |
-| `action-input-search` | input: **Search** |
-| `action-toggle-dark-mode` | toggle: **Dark Mode** |
-
-Supported types: `button`, `icon`, `input`, `dropdown`, `toggle`, `checkbox`, `radio`, `tab`, `link`, `nav`, `card`, `menu`, `fab`, `chip`
-
-See [NAMING_CONVENTION.md](./NAMING_CONVENTION.md) for the full designer guide.
-
-## Tech stack
-
-- **Next.js 14** (App Router)
-- **Zustand** + Immer (state management)
-- **Tailwind CSS v4** (styling)
-- **Figma REST API** (node tree access)
-- **Vercel** (deployment)
-
-## Development
+## Quick start
 
 ```bash
 npm install
 npm run dev
-# → http://localhost:3000
 ```
 
-## Figma token
+Open `http://localhost:3000`.
 
-1. Go to [figma.com](https://figma.com) → Settings → Security
-2. Generate personal access token → `file_content:read` scope
-3. Paste into FlowLens
+You can sign in immediately with the built-in local email flow. For production-style integrations, add environment variables for:
 
-## Deploy
+- `NEXTAUTH_SECRET`
+- `NEXTAUTH_URL`
+- `DATABASE_URL`
+- `FIGMA_CLIENT_ID`
+- `FIGMA_CLIENT_SECRET`
+- `FIGMA_OAUTH_REDIRECT_URI`
+- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`
+- `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET`
+- `EMAIL_SERVER_HOST` / `EMAIL_SERVER_PORT` / `EMAIL_SERVER_USER` / `EMAIL_SERVER_PASSWORD` / `EMAIL_FROM`
+- `S3_BUCKET` / `S3_REGION` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`
 
-Deployed on Vercel. Push to `main` → auto-deploys.
+## Figma usage
 
-## Architecture
+1. Open Settings → Figma integration
+2. Connect with OAuth or save a personal access token
+3. Open Projects and import a Figma file URL
+4. FlowLens fetches the file structure, caches screenshots, and groups screens by page and section
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full technical spec.
+## Manual mode
 
-## License
+1. Create a manual project
+2. Upload screenshots inside the editor
+3. Draw hotspots, define actions, and share the result with read-only links
 
-MIT
+## Database schema
+
+Drizzle config is included for Postgres:
+
+```bash
+npm run db:generate
+npm run db:push
+```
+
+The app currently ships with local persistence fallbacks so contributors can run it immediately, while still exposing the Postgres/Auth.js/S3/queue foundation needed for production deployment.
