@@ -26,6 +26,7 @@ export interface ParsedHotspot {
 export interface ParsedFrame {
   figmaNodeId: string;
   name: string;
+  pageName: string;
   /** Absolute bounding box of the frame */
   absoluteBounds: { x: number; y: number; width: number; height: number };
   /** All detected action-* nodes inside this frame */
@@ -170,6 +171,7 @@ export function parseFigmaFile(fileData: any): ParseResult {
       const frame: ParsedFrame = {
         figmaNodeId: child.id,
         name: child.name,
+        pageName: page.name,
         absoluteBounds: frameBounds,
         hotspots,
         totalNodes,

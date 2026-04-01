@@ -1,141 +1,113 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type {
-  Project, Screen, Hotspot, Connection,
-  ActionType, TransitionType, FigmaConnection,
-} from "./types";
-import { parseFigmaFile, extractFileKey, type ParseResult } from "./figma-parser";
+import type { Project, Screen, Connection, ActionType, TransitionType } from "./types";
+import { parseFigmaFile, extractFileKey } from "./figma-parser";
 
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 
-// ── Store ────────────────────────────────────────────────────────
-
 interface FlowLensState {
-  // Figma connection
-  figma: FigmaConnection;
-  parseResult: ParseResult | null;
+  // Settings (persisted to localStorage)
+  figmaToken: string;
+  figmaConnected: boolean;
 
-  // Project
+  // Current project
   project: Project | null;
+  loading: boolean;
+  loadingImages: boolean;
+  error: string | null;
 
   // UI
   selectedScreenId: string | null;
   selectedHotspotId: string | null;
-  editorMode: "select" | "connect";
-  playerActive: boolean;
-  playerCurrentScreenId: string | null;
+  searchQuery: string;
+  categoryFilter: string | null;
+  view: "grid" | "flow" | "player";
+  connectingHotspotId: string | null;
+  playerScreenId: string | null;
   playerHistory: string[];
 
-  // ── Figma actions ────────────────────────────────────────────
+  // Actions
   setFigmaToken: (token: string) => void;
-  setFigmaFileUrl: (url: string) => void;
-  connectFigma: () => Promise<void>;
+  loadFigmaFile: (fileUrl: string) => Promise<void>;
+  fetchFrameImages: () => Promise<void>;
   disconnect: () => void;
 
-  // ── Screen actions ───────────────────────────────────────────
-  uploadScreenImage: (screenId: string, imageDataUrl: string) => void;
-  setStartScreen: (screenId: string) => void;
-  updateScreenPosition: (screenId: string, pos: { x: number; y: number }) => void;
-
-  // ── Connection actions ───────────────────────────────────────
-  connectHotspot: (
-    sourceScreenId: string,
-    sourceHotspotId: string,
-    targetScreenId: string,
-    action: ActionType,
-    transition: TransitionType,
-  ) => void;
-  removeConnection: (connectionId: string) => void;
-
-  // ── Selection ────────────────────────────────────────────────
+  setSearch: (q: string) => void;
+  setCategoryFilter: (c: string | null) => void;
+  setView: (v: "grid" | "flow" | "player") => void;
   selectScreen: (id: string | null) => void;
-  selectHotspot: (id: string | null) => void;
-  setEditorMode: (mode: "select" | "connect") => void;
+  setStartScreen: (id: string) => void;
 
-  // ── Player ───────────────────────────────────────────────────
-  startPlayer: () => void;
-  stopPlayer: () => void;
+  startConnecting: (hotspotId: string) => void;
+  cancelConnecting: () => void;
+  connectTo: (targetScreenId: string, action: ActionType, transition: TransitionType) => void;
+  removeConnection: (id: string) => void;
+
   playerNavigate: (screenId: string) => void;
   playerGoBack: () => void;
+  startPlayer: () => void;
+  stopPlayer: () => void;
 
-  // ── Export ───────────────────────────────────────────────────
-  exportProjectJSON: () => string;
+  exportJSON: () => string;
 }
 
-export const useFlowLensStore = create<FlowLensState>()(
+export const useStore = create<FlowLensState>()(
   immer((set, get) => ({
-    figma: {
-      token: "",
-      fileUrl: "",
-      fileKey: "",
-      connected: false,
-      loading: false,
-      error: null,
-    },
-    parseResult: null,
+    figmaToken: "",
+    figmaConnected: false,
     project: null,
+    loading: false,
+    loadingImages: false,
+    error: null,
     selectedScreenId: null,
     selectedHotspotId: null,
-    editorMode: "select",
-    playerActive: false,
-    playerCurrentScreenId: null,
+    searchQuery: "",
+    categoryFilter: null,
+    view: "grid",
+    connectingHotspotId: null,
+    playerScreenId: null,
     playerHistory: [],
 
-    // ── Figma ──────────────────────────────────────────────────
+    setFigmaToken: (token) => set((s) => {
+      s.figmaToken = token;
+      if (typeof window !== "undefined") localStorage.setItem("fl_token", token);
+    }),
 
-    setFigmaToken: (token) =>
-      set((s) => { s.figma.token = token; }),
-
-    setFigmaFileUrl: (url) =>
-      set((s) => {
-        s.figma.fileUrl = url;
-        s.figma.fileKey = extractFileKey(url) || "";
-      }),
-
-    connectFigma: async () => {
-      const { figma } = get();
-      if (!figma.token || !figma.fileKey) {
-        set((s) => { s.figma.error = "Token and file URL are required"; });
+    loadFigmaFile: async (fileUrl: string) => {
+      const { figmaToken } = get();
+      const fileKey = extractFileKey(fileUrl);
+      if (!figmaToken || !fileKey) {
+        set((s) => { s.error = "Token and valid Figma URL required"; });
         return;
       }
 
-      set((s) => {
-        s.figma.loading = true;
-        s.figma.error = null;
-      });
+      set((s) => { s.loading = true; s.error = null; });
 
       try {
         const res = await fetch("/api/figma", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token: figma.token,
-            fileKey: figma.fileKey,
-          }),
+          body: JSON.stringify({ token: figmaToken, fileKey }),
         });
 
         if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `Failed (${res.status})`);
+          const b = await res.json().catch(() => ({}));
+          throw new Error(b.error || `Failed (${res.status})`);
         }
 
         const fileData = await res.json();
         const parsed = parseFigmaFile(fileData);
 
-        // Create project with screens from parsed frames
         const screens: Screen[] = parsed.allFrames.map((frame, i) => ({
           id: uid(),
           figmaFrameId: frame.figmaNodeId,
           name: frame.name,
-          imageDataUrl: null,
-          frameDimensions: {
-            w: frame.absoluteBounds.width,
-            h: frame.absoluteBounds.height,
-          },
+          imageUrl: null,
+          frameDimensions: { w: frame.absoluteBounds.width, h: frame.absoluteBounds.height },
           hotspots: frame.hotspots.map((h) => ({
             id: uid(),
-            screenId: "", // will be set below
+            screenId: "",
             figmaNodeId: h.figmaNodeId,
             label: h.label,
             elementType: h.elementType,
@@ -145,162 +117,163 @@ export const useFlowLensStore = create<FlowLensState>()(
           position: { x: (i % 4) * 340, y: Math.floor(i / 4) * 500 },
           order: i,
           isStartScreen: i === 0,
+          category: frame.pageName || "Uncategorized",
         }));
 
-        // Set screenId on hotspots
         for (const screen of screens) {
-          for (const h of screen.hotspots) {
-            h.screenId = screen.id;
-          }
+          for (const h of screen.hotspots) h.screenId = screen.id;
         }
 
         set((s) => {
-          s.figma.connected = true;
-          s.figma.loading = false;
-          s.parseResult = parsed;
           s.project = {
             id: uid(),
             name: parsed.fileName,
-            figmaFileKey: figma.fileKey,
+            figmaFileKey: fileKey,
             figmaFileName: parsed.fileName,
             screens,
             connections: [],
             createdAt: now(),
             updatedAt: now(),
           };
+          s.figmaConnected = true;
+          s.loading = false;
         });
-      } catch (err: any) {
-        set((s) => {
-          s.figma.loading = false;
-          s.figma.error = err.message;
-        });
+
+        // Auto-fetch images
+        get().fetchFrameImages();
+      } catch (e: any) {
+        set((s) => { s.loading = false; s.error = e.message; });
       }
     },
 
-    disconnect: () =>
-      set((s) => {
-        s.figma = {
-          token: "", fileUrl: "", fileKey: "",
-          connected: false, loading: false, error: null,
-        };
-        s.parseResult = null;
-        s.project = null;
-        s.selectedScreenId = null;
-        s.selectedHotspotId = null;
-      }),
+    fetchFrameImages: async () => {
+      const { project, figmaToken } = get();
+      if (!project || !figmaToken) return;
 
-    // ── Screens ────────────────────────────────────────────────
+      set((s) => { s.loadingImages = true; });
 
-    uploadScreenImage: (screenId, imageDataUrl) =>
-      set((s) => {
-        const screen = s.project?.screens.find((sc) => sc.id === screenId);
-        if (screen) screen.imageDataUrl = imageDataUrl;
-        if (s.project) s.project.updatedAt = now();
-      }),
+      try {
+        const nodeIds = project.screens.map((s) => s.figmaFrameId);
 
-    setStartScreen: (screenId) =>
-      set((s) => {
-        if (!s.project) return;
-        for (const screen of s.project.screens) {
-          screen.isStartScreen = screen.id === screenId;
+        // Figma limits to ~100 IDs per request, batch if needed
+        const batchSize = 50;
+        const allImages: Record<string, string> = {};
+
+        for (let i = 0; i < nodeIds.length; i += batchSize) {
+          const batch = nodeIds.slice(i, i + batchSize);
+          const res = await fetch("/api/figma/images", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              token: figmaToken,
+              fileKey: project.figmaFileKey,
+              nodeIds: batch,
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            Object.assign(allImages, data.images || {});
+          }
         }
-      }),
 
-    updateScreenPosition: (screenId, pos) =>
-      set((s) => {
-        const screen = s.project?.screens.find((sc) => sc.id === screenId);
-        if (screen) screen.position = pos;
-      }),
+        set((s) => {
+          if (!s.project) return;
+          for (const screen of s.project.screens) {
+            const url = allImages[screen.figmaFrameId];
+            if (url) screen.imageUrl = url;
+          }
+          s.loadingImages = false;
+        });
+      } catch {
+        set((s) => { s.loadingImages = false; });
+      }
+    },
 
-    // ── Connections ────────────────────────────────────────────
+    disconnect: () => set((s) => {
+      s.figmaToken = "";
+      s.figmaConnected = false;
+      s.project = null;
+      s.selectedScreenId = null;
+      s.error = null;
+      if (typeof window !== "undefined") localStorage.removeItem("fl_token");
+    }),
 
-    connectHotspot: (sourceScreenId, sourceHotspotId, targetScreenId, action, transition) => {
+    setSearch: (q) => set((s) => { s.searchQuery = q; }),
+    setCategoryFilter: (c) => set((s) => { s.categoryFilter = c; }),
+    setView: (v) => set((s) => { s.view = v; }),
+    selectScreen: (id) => set((s) => { s.selectedScreenId = id; s.selectedHotspotId = null; }),
+
+    setStartScreen: (id) => set((s) => {
+      if (!s.project) return;
+      for (const sc of s.project.screens) sc.isStartScreen = sc.id === id;
+    }),
+
+    startConnecting: (hotspotId) => set((s) => { s.connectingHotspotId = hotspotId; }),
+    cancelConnecting: () => set((s) => { s.connectingHotspotId = null; }),
+
+    connectTo: (targetScreenId, action, transition) => {
+      const { connectingHotspotId, project } = get();
+      if (!connectingHotspotId || !project) return;
+
+      // Find source screen
+      let sourceScreenId = "";
+      for (const sc of project.screens) {
+        if (sc.hotspots.some((h) => h.id === connectingHotspotId)) {
+          sourceScreenId = sc.id;
+          break;
+        }
+      }
+      if (!sourceScreenId) return;
+
       const id = uid();
       set((s) => {
         if (!s.project) return;
-        // Remove existing connection from this hotspot
         s.project.connections = s.project.connections.filter(
-          (c) => c.sourceHotspotId !== sourceHotspotId
+          (c) => c.sourceHotspotId !== connectingHotspotId
         );
-        // Add new
         s.project.connections.push({
-          id, sourceHotspotId, sourceScreenId, targetScreenId,
-          action, transition,
+          id, sourceHotspotId: connectingHotspotId!, sourceScreenId,
+          targetScreenId, action, transition,
         });
-        // Link on hotspot
-        const screen = s.project.screens.find((sc) => sc.id === sourceScreenId);
-        const hotspot = screen?.hotspots.find((h) => h.id === sourceHotspotId);
-        if (hotspot) hotspot.connectionId = id;
+        for (const sc of s.project.screens) {
+          const h = sc.hotspots.find((h) => h.id === connectingHotspotId);
+          if (h) h.connectionId = id;
+        }
+        s.connectingHotspotId = null;
         s.project.updatedAt = now();
       });
     },
 
-    removeConnection: (connectionId) =>
-      set((s) => {
-        if (!s.project) return;
-        const conn = s.project.connections.find((c) => c.id === connectionId);
-        if (conn) {
-          for (const screen of s.project.screens) {
-            for (const h of screen.hotspots) {
-              if (h.connectionId === connectionId) h.connectionId = undefined;
-            }
-          }
+    removeConnection: (id) => set((s) => {
+      if (!s.project) return;
+      for (const sc of s.project.screens) {
+        for (const h of sc.hotspots) {
+          if (h.connectionId === id) h.connectionId = undefined;
         }
-        s.project.connections = s.project.connections.filter(
-          (c) => c.id !== connectionId
-        );
-        s.project.updatedAt = now();
-      }),
+      }
+      s.project.connections = s.project.connections.filter((c) => c.id !== id);
+    }),
 
-    // ── Selection ──────────────────────────────────────────────
-
-    selectScreen: (id) => set((s) => { s.selectedScreenId = id; s.selectedHotspotId = null; }),
-    selectHotspot: (id) => set((s) => { s.selectedHotspotId = id; }),
-    setEditorMode: (mode) => set((s) => { s.editorMode = mode; }),
-
-    // ── Player ─────────────────────────────────────────────────
-
-    startPlayer: () =>
-      set((s) => {
-        if (!s.project) return;
-        const start = s.project.screens.find((sc) => sc.isStartScreen)
-          || s.project.screens[0];
-        if (start) {
-          s.playerCurrentScreenId = start.id;
-          s.playerHistory = [];
-          s.playerActive = true;
-        }
-      }),
-
-    stopPlayer: () =>
-      set((s) => {
-        s.playerActive = false;
-        s.playerCurrentScreenId = null;
+    startPlayer: () => set((s) => {
+      if (!s.project) return;
+      const start = s.project.screens.find((sc) => sc.isStartScreen) || s.project.screens[0];
+      if (start) {
+        s.playerScreenId = start.id;
         s.playerHistory = [];
-      }),
+        s.view = "player";
+      }
+    }),
+    stopPlayer: () => set((s) => { s.view = "grid"; s.playerScreenId = null; s.playerHistory = []; }),
+    playerNavigate: (screenId) => set((s) => {
+      if (s.playerScreenId) s.playerHistory.push(s.playerScreenId);
+      s.playerScreenId = screenId;
+    }),
+    playerGoBack: () => set((s) => {
+      const prev = s.playerHistory.pop();
+      if (prev) s.playerScreenId = prev;
+    }),
 
-    playerNavigate: (screenId) =>
-      set((s) => {
-        if (s.playerCurrentScreenId) s.playerHistory.push(s.playerCurrentScreenId);
-        s.playerCurrentScreenId = screenId;
-      }),
-
-    playerGoBack: () =>
-      set((s) => {
-        const prev = s.playerHistory.pop();
-        if (prev) s.playerCurrentScreenId = prev;
-      }),
-
-    // ── Export ──────────────────────────────────────────────────
-
-    exportProjectJSON: () => {
-      const project = get().project;
-      if (!project) return "{}";
-      const exportable = {
-        ...project,
-        screens: project.screens.map((s) => ({ ...s, imageDataUrl: null })),
-      };
-      return JSON.stringify(exportable, null, 2);
-    },
+    exportJSON: () => JSON.stringify(get().project, null, 2),
   }))
 );
