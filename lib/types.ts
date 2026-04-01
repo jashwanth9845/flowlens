@@ -1,245 +1,57 @@
 export const ELEMENT_TYPES = [
-  "button",
-  "icon-button",
-  "input",
-  "dropdown",
-  "toggle",
-  "checkbox",
-  "radio",
-  "tab",
-  "link",
-  "nav-item",
-  "card",
-  "menu-item",
-  "fab",
-  "chip",
-  "custom",
+  "button","icon-button","input","dropdown","toggle","checkbox",
+  "radio","tab","link","nav-item","card","menu-item","fab","chip","custom",
 ] as const;
-
-export const SCREEN_TAGS = [
-  "auth",
-  "onboarding",
-  "home",
-  "settings",
-  "modal",
-  "detail",
-  "list",
-  "form",
-  "success",
-  "error",
-] as const;
-
-export const SCREEN_FILTERS = [
-  "all",
-  "start",
-  "unlinked",
-  "dead-end",
-  "no-hotspots",
-  "changed-since-last-sync",
-  "manual",
-] as const;
-
 export type ElementType = (typeof ELEMENT_TYPES)[number];
-export type ScreenTag = (typeof SCREEN_TAGS)[number];
-export type ScreenFilter = (typeof SCREEN_FILTERS)[number];
-export type ProjectSourceMode = "figma" | "manual" | "hybrid";
-export type SyncStatus = "draft" | "queued" | "running" | "complete" | "failed";
-export type ScreenSourceType = "figma" | "manual";
-export type HotspotSourceType = "figma" | "manual";
-export type ImportSourceMode = "figma" | "manual";
-export type FigmaConnectionMode = "oauth" | "pat";
-export type ConnectionAction = "navigate" | "back" | "open_overlay" | "open_url";
-export type TransitionType =
-  | "push"
-  | "fade"
-  | "slide-left"
-  | "slide-right"
-  | "slide-up"
-  | "none";
 
-export interface NormalizedBounds {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+export const SCREEN_FILTERS = ["all","start","unlinked","dead-end","no-hotspots","has-image"] as const;
+export type ScreenFilter = (typeof SCREEN_FILTERS)[number];
+
+export type ConnectionAction = "navigate" | "back" | "open_overlay" | "open_url";
+export type TransitionType = "push" | "fade" | "slide-left" | "slide-right" | "slide-up" | "none";
+
+export interface NormalizedBounds { x: number; y: number; w: number; h: number }
+
+export const ELEMENT_COLORS: Record<ElementType, string> = {
+  button:"#3b82f6","icon-button":"#6366f1",input:"#f59e0b",dropdown:"#8b5cf6",
+  toggle:"#10b981",checkbox:"#14b8a6",radio:"#06b6d4",tab:"#ec4899",
+  link:"#0ea5e9","nav-item":"#64748b",card:"#f97316","menu-item":"#a855f7",
+  fab:"#d946ef",chip:"#84cc16",custom:"#78716c",
+};
 
 export interface Hotspot {
-  id: string;
-  screenId: string;
-  figmaNodeId?: string;
-  label: string;
-  elementType: ElementType;
-  rawName: string;
-  sourceType: HotspotSourceType;
-  editable: boolean;
-  geometry: NormalizedBounds;
-  connectionId?: string;
+  id: string; screenId: string; figmaNodeId?: string;
+  label: string; elementType: ElementType; rawName: string;
+  bounds: NormalizedBounds; connectionId?: string;
 }
 
 export interface Connection {
-  id: string;
-  sourceHotspotId: string;
-  sourceScreenId: string;
-  action: ConnectionAction;
-  transition: TransitionType;
-  targetScreenId?: string;
-  targetUrl?: string;
+  id: string; sourceHotspotId: string; sourceScreenId: string;
+  targetScreenId?: string; targetUrl?: string;
+  action: ConnectionAction; transition: TransitionType;
 }
 
 export interface Screen {
-  id: string;
-  projectId: string;
-  name: string;
-  category: string;
-  subcategory: string | null;
-  tags: ScreenTag[];
-  sourceType: ScreenSourceType;
-  sourceNodeId?: string;
-  imageAssetKey: string;
-  imageUrl: string;
-  imageWidth: number;
-  imageHeight: number;
-  analysisConfidence: number;
-  hotspots: Hotspot[];
-  order: number;
-  isStartScreen: boolean;
-  changedSinceLastSync: boolean;
-  lastSyncedAt: string | null;
-}
-
-export interface ProjectViewState {
-  selectedScreenId: string | null;
-  searchQuery: string;
-  activeFilter: ScreenFilter;
+  id: string; name: string; category: string; subcategory: string | null;
+  figmaNodeId?: string; imageUrl: string | null;
+  imageWidth: number; imageHeight: number;
+  hotspots: Hotspot[]; order: number; isStartScreen: boolean;
 }
 
 export interface Project {
-  id: string;
-  ownerId: string;
-  name: string;
-  description: string;
-  sourceMode: ProjectSourceMode;
-  syncStatus: SyncStatus;
-  figmaFileKey?: string;
-  figmaFileName?: string;
-  figmaLastModified?: string;
-  lastImportAt: string | null;
-  lastOpenedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  screens: Screen[];
-  connections: Connection[];
-  viewState: ProjectViewState;
-}
-
-export interface FigmaConnection {
-  id: string;
-  userId: string;
-  mode: FigmaConnectionMode;
-  displayName: string;
-  scopes: string[];
-  accessTokenEncrypted?: string;
-  refreshTokenEncrypted?: string;
-  patTokenEncrypted?: string;
-  tokenExpiresAt?: string;
-  createdAt: string;
-  updatedAt: string;
-  lastSyncAt: string | null;
-}
-
-export interface ProjectImport {
-  id: string;
-  userId: string;
-  projectId: string;
-  sourceMode: ImportSourceMode;
-  status: SyncStatus;
-  sourceLabel: string;
-  error: string | null;
-  createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-}
-
-export interface ShareLink {
-  id: string;
-  projectId: string;
-  token: string;
-  createdAt: string;
-  revokedAt: string | null;
-}
-
-export interface LocalUserRecord {
-  id: string;
-  email: string;
-  name: string;
-  image?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface StoreData {
-  users: LocalUserRecord[];
-  projects: Project[];
-  figmaConnections: FigmaConnection[];
-  imports: ProjectImport[];
-  shareLinks: ShareLink[];
-}
-
-export interface ProjectSummary {
-  id: string;
-  name: string;
-  description: string;
-  sourceMode: ProjectSourceMode;
-  syncStatus: SyncStatus;
-  screenCount: number;
-  connectionCount: number;
-  categoryCount: number;
-  updatedAt: string;
-  lastOpenedAt: string | null;
+  id: string; name: string; figmaFileKey: string; figmaFileName: string;
+  screens: Screen[]; connections: Connection[];
+  createdAt: string; updatedAt: string;
 }
 
 export interface FigmaScreenCandidate {
-  figmaNodeId: string;
-  name: string;
-  pageName: string;
-  sectionName: string | null;
-  absoluteBounds: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  hotspots: {
-    figmaNodeId: string;
-    label: string;
-    elementType: ElementType;
-    rawName: string;
-    normalizedBounds: NormalizedBounds;
-  }[];
+  figmaNodeId: string; name: string; pageName: string; sectionName: string | null;
+  absoluteBounds: { x: number; y: number; width: number; height: number };
+  hotspots: { figmaNodeId: string; label: string; elementType: ElementType;
+    rawName: string; normalizedBounds: NormalizedBounds; }[];
 }
 
 export interface FigmaParseResult {
-  fileName: string;
-  fileKey: string;
-  lastModified?: string;
+  fileName: string; fileKey: string; lastModified?: string;
   screens: FigmaScreenCandidate[];
 }
-
-export const ELEMENT_COLORS: Record<ElementType, string> = {
-  button: "#2563eb",
-  "icon-button": "#6d28d9",
-  input: "#d97706",
-  dropdown: "#9333ea",
-  toggle: "#059669",
-  checkbox: "#0891b2",
-  radio: "#0284c7",
-  tab: "#db2777",
-  link: "#0f766e",
-  "nav-item": "#475569",
-  card: "#ea580c",
-  "menu-item": "#7c3aed",
-  fab: "#c026d3",
-  chip: "#65a30d",
-  custom: "#78716c",
-};

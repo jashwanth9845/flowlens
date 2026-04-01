@@ -1,47 +1,32 @@
 import type { Project } from "./types";
 
 export function generateMarkdown(project: Project): string {
-  const screenMap = new Map(project.screens.map((screen) => [screen.id, screen]));
+  const sm = new Map(project.screens.map((s) => [s.id, s]));
   const lines: string[] = [];
-
-  lines.push(`# ${project.name} — FlowLens export`);
-  lines.push(`> Source: ${project.sourceMode}`);
-  lines.push(`> Updated: ${new Date(project.updatedAt).toLocaleString()}`);
+  lines.push(`# ${project.name} — Flow Map`);
+  lines.push(`> Figma: ${project.figmaFileName} · Exported: ${new Date().toLocaleString()}`);
   lines.push("");
-  lines.push("## Summary");
-  lines.push(`- Screens: ${project.screens.length}`);
-  lines.push(`- Connections: ${project.connections.length}`);
-  lines.push(`- Sync status: ${project.syncStatus}`);
+
+  const totalActions = project.screens.reduce((n, s) => n + s.hotspots.length, 0);
+  lines.push(`**${project.screens.length}** screens · **${totalActions}** actions · **${project.connections.length}** connections`);
   lines.push("");
-  lines.push("## Screens");
 
-  for (const screen of project.screens) {
-    const category = screen.subcategory
-      ? `${screen.category} / ${screen.subcategory}`
-      : screen.category;
-
-    lines.push(`### ${screen.name}${screen.isStartScreen ? " (start)" : ""}`);
-    lines.push(`- Category: ${category}`);
-    lines.push(`- Tags: ${screen.tags.join(", ") || "none"}`);
-    lines.push(`- Hotspots: ${screen.hotspots.length}`);
-
-    for (const hotspot of screen.hotspots) {
-      const connection = project.connections.find(
-        (candidate) => candidate.sourceHotspotId === hotspot.id,
-      );
-      const target = connection?.targetScreenId
-        ? screenMap.get(connection.targetScreenId)
-        : null;
-      const destination = target
-        ? target.name
-        : connection?.targetUrl ?? "unlinked";
-      lines.push(
-        `- ${hotspot.label} [${hotspot.elementType}] -> ${connection?.action ?? "none"} -> ${destination}`,
-      );
+  const cats = new Set(project.screens.map((s) => s.category));
+  for (const cat of cats) {
+    lines.push(`## ${cat}`);
+    const screens = project.screens.filter((s) => s.category === cat);
+    for (const screen of screens) {
+      const star = screen.isStartScreen ? " ⭐" : "";
+      lines.push(`### ${screen.name}${star}`);
+      if (screen.subcategory) lines.push(`> Section: ${screen.subcategory}`);
+      for (const h of screen.hotspots) {
+        const conn = project.connections.find((c) => c.sourceHotspotId === h.id);
+        const tgt = conn?.targetScreenId ? sm.get(conn.targetScreenId) : null;
+        const arrow = tgt ? ` → **${tgt.name}** (${conn!.action})` : "";
+        lines.push(`- \`${h.rawName}\` ${h.elementType}: **${h.label}**${arrow}`);
+      }
+      lines.push("");
     }
-
-    lines.push("");
   }
-
   return lines.join("\n");
 }
