@@ -294,11 +294,13 @@ function Settings({ onBack }: { onBack: () => void }) {
 function Workspace({ onBack }: { onBack: () => void }) {
   const project = useStore((s) => s.project!);
   const loadingImages = useStore((s) => s.loadingImages);
+  const imageProgress = useStore((s) => s.imageProgress);
   const search = useStore((s) => s.search);
   const filter = useStore((s) => s.filter);
   const selectedId = useStore((s) => s.selectedScreenId);
   const connecting = useStore((s) => s.connectingHotspotId);
   const { setSearch, setFilter, selectScreen, startPlayer } = useStore();
+  const [visible, setVisible] = useState(24);
 
   const categories = useMemo(() => {
     const m = new Map<string, number>();
@@ -319,8 +321,22 @@ function Workspace({ onBack }: { onBack: () => void }) {
     return list;
   }, [project, catFilter, filter, search]);
 
+  // Reset visible count when filters change
+  useEffect(() => { setVisible(24); }, [catFilter, filter, search]);
+
+  const visibleScreens = screens.slice(0, visible);
+  const hasMore = visible < screens.length;
   const selected = project.screens.find((s) => s.id === selectedId);
   const total = project.screens.reduce((n, s) => n + s.hotspots.length, 0);
+  const missingImages = project.screens.filter((s) => !s.imageUrl).length;
+
+  // Refresh images for already-imported projects
+  const handleRefreshImages = async () => {
+    const token = await useStore.getState().getFigmaToken();
+    if (token && project.figmaFileKey) {
+      useStore.getState().fetchImages(token);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -332,12 +348,34 @@ function Workspace({ onBack }: { onBack: () => void }) {
           <span className="text-[10px] text-zinc-600 hidden sm:inline ml-1">{project.screens.length} screens · {total} actions · {project.connections.length} flows</span>
         </div>
         <div className="flex items-center gap-1.5">
+          {missingImages > 0 && !loadingImages && project.figmaFileKey && (
+            <BtnSm onClick={handleRefreshImages}>↻ Fetch {missingImages} images</BtnSm>
+          )}
           <BtnSm onClick={startPlayer} accent>▶ Play</BtnSm>
           <BtnSm onClick={() => { const md = generateMarkdown(project); navigator.clipboard.writeText(md); }}>Export</BtnSm>
         </div>
       </header>
 
-      {loadingImages && <LoadingBar text="Caching screenshots from Figma..." />}
+      {/* Progress bar for image caching */}
+      {loadingImages && (
+        <div className="border-b border-indigo-900/20 bg-indigo-950/20">
+          <div className="px-4 py-2 flex items-center gap-3">
+            <Spin />
+            <span className="text-xs text-indigo-400">
+              Caching screenshots... {imageProgress.done}/{imageProgress.total}
+            </span>
+            <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                style={{ width: imageProgress.total > 0 ? `${(imageProgress.done / imageProgress.total) * 100}%` : "0%" }}
+              />
+            </div>
+            <span className="text-[10px] text-zinc-500">
+              {imageProgress.total > 0 ? Math.round((imageProgress.done / imageProgress.total) * 100) : 0}%
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
@@ -366,14 +404,27 @@ function Workspace({ onBack }: { onBack: () => void }) {
           </div>
         </aside>
 
-        {/* Grid */}
+        {/* Grid with pagination */}
         <main className="flex-1 overflow-y-auto p-4">
           {screens.length === 0 ? (
             <div className="flex items-center justify-center h-full text-zinc-600 text-sm">{search ? `No matches` : "No screens"}</div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {screens.map((sc) => <Card key={sc.id} screen={sc} selected={selectedId === sc.id} onClick={() => selectScreen(sc.id === selectedId ? null : sc.id)} />)}
-            </div>
+            <>
+              <p className="text-[10px] text-zinc-600 mb-3">
+                Showing {Math.min(visible, screens.length)} of {screens.length} screens
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                {visibleScreens.map((sc) => <Card key={sc.id} screen={sc} selected={selectedId === sc.id} onClick={() => selectScreen(sc.id === selectedId ? null : sc.id)} />)}
+              </div>
+              {hasMore && (
+                <div className="mt-6 text-center">
+                  <button onClick={() => setVisible((v) => v + 24)}
+                    className="px-6 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 cursor-pointer transition">
+                    Load more ({screens.length - visible} remaining)
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </main>
 
